@@ -39,7 +39,11 @@ interface KeywordData {
 interface CompetitorAnalysisProps {
   websiteUrl: string
   targetKeywords: string
-  onAnalysisComplete: (data: any) => void
+  onAnalysisComplete: (data: {
+    competitors: CompetitorData[]
+    keywords: KeywordData[]
+    opportunities: string[]
+  }) => void
 }
 
 export function CompetitorAnalysis({ websiteUrl, targetKeywords, onAnalysisComplete }: CompetitorAnalysisProps) {

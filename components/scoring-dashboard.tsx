@@ -18,13 +18,6 @@ export function ScoringDashboard({
   seoScore,
   factCheckScore
 }: ScoringDashboardProps) {
-  const getScoreColor = (score: number) => {
-    if (score >= 80) return "score-excellent"
-    if (score >= 60) return "score-good"
-    if (score >= 40) return "score-warning"
-    return "score-poor"
-  }
-
   const getScoreIcon = (score: number) => {
     if (score >= 80) return <CheckCircle className="h-4 w-4" />
     if (score >= 60) return <Target className="h-4 w-4" />
