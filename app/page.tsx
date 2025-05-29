@@ -7,13 +7,27 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { ScoringDashboard } from "@/components/scoring-dashboard"
+import { EnhancedScoringDashboard } from "@/components/enhanced-scoring-dashboard"
+import { ReadabilityEnhancer } from "@/components/readability-enhancer"
+import { ProjectManager } from "@/components/project-manager"
 import { CompetitorAnalysisV2 } from "@/components/competitor-analysis-v2"
-import { calculateReadabilityScore, calculateOriginalityScore, calculateSEOScore } from "@/lib/utils"
-import { Search, FileText, Target, CheckCircle, Users, Lightbulb } from "lucide-react"
+import { Search, FileText, Target, CheckCircle, Users, Lightbulb, Save, BookOpen } from "lucide-react"
+
+interface ProjectData {
+  websiteUrl: string
+  targetKeywords: string
+  title: string
+  metaDescription: string
+  content: string
+  humanInsights: string
+  sources: string
+  targetGradeLevel: number
+  internalLinks: number
+  externalLinks: number
+}
 
 export default function Home() {
-  const [projectData, setProjectData] = useState({
+  const [projectData, setProjectData] = useState<ProjectData>({
     websiteUrl: "",
     targetKeywords: "",
     title: "",
@@ -21,52 +35,46 @@ export default function Home() {
     content: "",
     humanInsights: "",
     sources: "",
+    targetGradeLevel: 8,
     internalLinks: 0,
     externalLinks: 0
   })
 
-  const [scores, setScores] = useState({
-    readability: 0,
-    originality: 0,
-    seo: 0,
-    factCheck: 0
-  })
-
   const [currentStep, setCurrentStep] = useState("research")
+  const [analysisScores, setAnalysisScores] = useState<any>(null)
 
-  const updateScores = () => {
-    const readabilityScore = calculateReadabilityScore(projectData.content)
-    const originalityScore = calculateOriginalityScore(projectData.content)
-    const seoScore = calculateSEOScore({
-      title: projectData.title,
-      metaDescription: projectData.metaDescription,
-      headings: [], // Would extract from content in real implementation
-      content: projectData.content,
-      internalLinks: projectData.internalLinks,
-      externalLinks: projectData.externalLinks
-    })
-    const factCheckScore = projectData.sources.split('\n').filter(s => s.trim()).length * 20 // Simplified
+  const handleInputChange = (field: keyof ProjectData, value: string | number) => {
+    setProjectData(prev => ({ ...prev, [field]: value }))
+  }
 
-    setScores({
-      readability: readabilityScore,
-      originality: originalityScore,
-      seo: seoScore,
-      factCheck: Math.min(100, factCheckScore)
+  const handleProjectLoad = (loadedProject: any) => {
+    setProjectData({
+      websiteUrl: loadedProject.websiteUrl || "",
+      targetKeywords: loadedProject.targetKeywords || "",
+      title: loadedProject.title || "",
+      metaDescription: loadedProject.metaDescription || "",
+      content: loadedProject.content || "",
+      humanInsights: loadedProject.humanInsights || "",
+      sources: loadedProject.sources || "",
+      targetGradeLevel: loadedProject.targetGradeLevel || 8,
+      internalLinks: loadedProject.internalLinks || 0,
+      externalLinks: loadedProject.externalLinks || 0
     })
   }
 
-  const handleInputChange = (field: string, value: string | number) => {
-    setProjectData(prev => ({ ...prev, [field]: value }))
-    // Update scores when content changes
-    if (field === 'content' || field === 'title' || field === 'metaDescription') {
-      setTimeout(updateScores, 100)
-    }
+  const handleContentUpdate = (newContent: string) => {
+    setProjectData(prev => ({ ...prev, content: newContent }))
+  }
+
+  const handleTargetLevelChange = (level: number) => {
+    setProjectData(prev => ({ ...prev, targetGradeLevel: level }))
   }
 
   const workflowSteps = [
     { id: "research", label: "Research & Analysis", icon: Search, description: "Competitor analysis and keyword research" },
     { id: "structure", label: "Content Structure", icon: FileText, description: "Outline and heading structure" },
     { id: "content", label: "Content Creation", icon: Users, description: "Human-first content writing" },
+    { id: "readability", label: "Readability", icon: BookOpen, description: "Optimize reading level and human tone" },
     { id: "optimize", label: "SEO Optimization", icon: Target, description: "Technical SEO and metadata" },
     { id: "review", label: "Quality Review", icon: CheckCircle, description: "Final checks and validation" }
   ]
@@ -82,17 +90,16 @@ export default function Home() {
             Create authentic, well-researched content that serves users and search engines
           </p>
           
-          <ScoringDashboard
-            readabilityScore={scores.readability}
-            originalityScore={scores.originality}
-            seoScore={scores.seo}
-            factCheckScore={scores.factCheck}
+          {/* Enhanced Scoring Dashboard */}
+          <EnhancedScoringDashboard
+            projectData={projectData}
+            onAnalysisUpdate={setAnalysisScores}
           />
         </div>
 
         <div className="grid gap-6 lg:grid-cols-4">
           {/* Workflow Steps Sidebar */}
-          <div className="lg:col-span-1">
+          <div className="lg:col-span-1 space-y-4">
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -107,13 +114,12 @@ export default function Home() {
                 {workflowSteps.map((step) => {
                   const Icon = step.icon
                   const isActive = currentStep === step.id
-                  const isCompleted = false // Would track completion in real app
                   
                   return (
                     <div
                       key={step.id}
-                      className={`workflow-step cursor-pointer transition-colors ${
-                        isActive ? 'active' : isCompleted ? 'completed' : 'pending'
+                      className={`workflow-step cursor-pointer transition-colors p-3 rounded-lg border ${
+                        isActive ? 'bg-primary/10 border-primary' : 'hover:bg-muted'
                       }`}
                       onClick={() => setCurrentStep(step.id)}
                     >
@@ -129,12 +135,18 @@ export default function Home() {
                 })}
               </CardContent>
             </Card>
+
+            {/* Project Manager in Sidebar */}
+            <ProjectManager
+              currentProject={projectData}
+              onProjectLoad={handleProjectLoad}
+            />
           </div>
 
           {/* Main Content Area */}
           <div className="lg:col-span-3">
             <Tabs value={currentStep} onValueChange={setCurrentStep}>
-              <TabsList className="grid w-full grid-cols-5">
+              <TabsList className="grid w-full grid-cols-6">
                 {workflowSteps.map((step) => (
                   <TabsTrigger key={step.id} value={step.id} className="text-xs">
                     {step.label}
@@ -175,7 +187,6 @@ export default function Home() {
                       websiteUrl={projectData.websiteUrl}
                       targetKeywords={projectData.targetKeywords}
                       onAnalysisComplete={(data) => {
-                        // Handle analysis completion
                         console.log('Analysis complete:', data)
                       }}
                     />
@@ -253,7 +264,7 @@ export default function Home() {
                       />
                       <div className="flex justify-between text-xs text-muted-foreground">
                         <span>{projectData.content.split(/\s+/).filter(w => w.length > 0).length} words</span>
-                        <span>Reading Level: {scores.readability.toFixed(1)} grade</span>
+                        <span>Target: {projectData.targetGradeLevel}th grade</span>
                       </div>
                     </div>
                     <div className="space-y-2">
@@ -268,6 +279,15 @@ export default function Home() {
                     </div>
                   </CardContent>
                 </Card>
+              </TabsContent>
+
+              <TabsContent value="readability" className="space-y-4">
+                <ReadabilityEnhancer
+                  content={projectData.content}
+                  targetGradeLevel={projectData.targetGradeLevel}
+                  onContentUpdate={handleContentUpdate}
+                  onTargetLevelChange={handleTargetLevelChange}
+                />
               </TabsContent>
 
               <TabsContent value="optimize" className="space-y-4">
@@ -301,10 +321,6 @@ export default function Home() {
                         />
                       </div>
                     </div>
-                    <Button onClick={updateScores} className="w-full">
-                      <Target className="mr-2 h-4 w-4" />
-                      Analyze SEO Performance
-                    </Button>
                   </CardContent>
                 </Card>
               </TabsContent>
@@ -323,23 +339,36 @@ export default function Home() {
                         <h4 className="font-medium mb-2">Content Quality Checklist</h4>
                         <div className="space-y-2 text-sm">
                           <div className="flex items-center gap-2">
-                            <CheckCircle className="h-4 w-4 text-green-500" />
+                            <CheckCircle className={`h-4 w-4 ${projectData.humanInsights.length > 50 ? 'text-green-500' : 'text-gray-400'}`} />
                             <span>Includes personal insights and experiences</span>
                           </div>
                           <div className="flex items-center gap-2">
-                            <CheckCircle className="h-4 w-4 text-green-500" />
+                            <CheckCircle className={`h-4 w-4 ${projectData.sources.length > 20 ? 'text-green-500' : 'text-gray-400'}`} />
                             <span>All facts are properly sourced</span>
                           </div>
                           <div className="flex items-center gap-2">
-                            <CheckCircle className="h-4 w-4 text-green-500" />
-                            <span>Reading level is appropriate (4th-6th grade)</span>
+                            <CheckCircle className={`h-4 w-4 ${projectData.targetGradeLevel <= 8 ? 'text-green-500' : 'text-gray-400'}`} />
+                            <span>Reading level is appropriate (8th grade or below)</span>
                           </div>
                           <div className="flex items-center gap-2">
-                            <CheckCircle className="h-4 w-4 text-green-500" />
-                            <span>Content serves user intent</span>
+                            <CheckCircle className={`h-4 w-4 ${projectData.content.length > 300 ? 'text-green-500' : 'text-gray-400'}`} />
+                            <span>Content provides substantial value</span>
                           </div>
                         </div>
                       </div>
+                      
+                      {analysisScores && (
+                        <div className="p-4 border rounded-lg bg-green-50">
+                          <h4 className="font-medium mb-2">Final Analysis Score</h4>
+                          <div className="text-2xl font-bold text-green-600">
+                            {analysisScores.overall}% Overall Quality
+                          </div>
+                          <div className="text-sm text-muted-foreground mt-1">
+                            Ready for publication with human-first optimization
+                          </div>
+                        </div>
+                      )}
+                      
                       <Button className="w-full" size="lg">
                         <CheckCircle className="mr-2 h-4 w-4" />
                         Publish Human-Certified Content
