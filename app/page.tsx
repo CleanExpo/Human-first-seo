@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { ScoringDashboard } from "@/components/scoring-dashboard"
-import { CompetitorAnalysis } from "@/components/competitor-analysis"
+import { CompetitorAnalysisV2 } from "@/components/competitor-analysis-v2"
 import { calculateReadabilityScore, calculateOriginalityScore, calculateSEOScore } from "@/lib/utils"
 import { Search, FileText, Target, CheckCircle, Users, Lightbulb } from "lucide-react"
 
@@ -171,7 +171,7 @@ export default function Home() {
                         />
                       </div>
                     </div>
-                    <CompetitorAnalysis
+                    <CompetitorAnalysisV2
                       websiteUrl={projectData.websiteUrl}
                       targetKeywords={projectData.targetKeywords}
                       onAnalysisComplete={(data) => {
