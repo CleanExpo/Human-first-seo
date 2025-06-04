@@ -3,6 +3,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { openaiClient } from '@/lib/api/openai-client';
 import { claudeClient } from '@/lib/api/claude-client';
+import { perplexityClient } from '@/lib/api/perplexity-client';
 import type { 
   CompetitorAnalysisRequest, 
   CompetitorAnalysisResponse,
@@ -32,22 +33,34 @@ export async function POST(request: NextRequest) {
     // Set default analysis depth
     const analysisDepth = body.analysisDepth || 'detailed';
 
-    // Step 1: Get competitor analysis from OpenAI
+    // Step 1: Get competitor analysis from OpenAI and Perplexity in parallel
     console.log('🔍 Starting competitor analysis for:', body.websiteUrl);
-    const openaiResponse = await openaiClient.analyzeCompetitors({
-      websiteUrl: body.websiteUrl,
-      targetKeywords: body.targetKeywords,
-      analysisDepth
-    });
+    const [openaiResult, perplexityResult] = await Promise.allSettled([
+      openaiClient.analyzeCompetitors({
+        websiteUrl: body.websiteUrl,
+        targetKeywords: body.targetKeywords,
+        analysisDepth
+      }),
+      perplexityClient.analyzeCompetitors({
+        websiteUrl: body.websiteUrl,
+        targetKeywords: body.targetKeywords,
+        analysisDepth
+      })
+    ]);
 
-    if (!openaiResponse.success || !openaiResponse.data) {
-      console.error('❌ OpenAI competitor analysis failed:', openaiResponse.error);
-      return NextResponse.json(openaiResponse, { status: 500 });
+    const openaiResponse = openaiResult.status === 'fulfilled' ? openaiResult.value : null;
+    const perplexityResponse = perplexityResult.status === 'fulfilled' ? perplexityResult.value : null;
+
+    if (!openaiResponse?.success && !perplexityResponse?.success) {
+      console.error('❌ Both OpenAI and Perplexity competitor analysis failed');
+      return NextResponse.json(openaiResponse || perplexityResponse, { status: 500 });
     }
+
+    const baseData = openaiResponse?.data || perplexityResponse?.data;
 
     // Step 2: Enhance content gaps analysis with Claude
     console.log('🧠 Enhancing content gaps with Claude...');
-    const competitorContent = openaiResponse.data.competitors.map(
+    const competitorContent = baseData!.competitors.map(
       comp => `${comp.domain}: ${comp.topKeywords.join(', ')} - ${comp.contentGaps.join(', ')}`
     );
 
@@ -57,7 +70,29 @@ export async function POST(request: NextRequest) {
     );
 
     // Step 3: Merge and enhance the analysis
-    const enhancedResponse = { ...openaiResponse.data };
+    const enhancedResponse = { ...(baseData as CompetitorAnalysisResponse) };
+
+    if (perplexityResponse?.success && perplexityResponse.data) {
+      // Merge Perplexity insights
+      const combinedCompetitors = [
+        ...enhancedResponse.competitors,
+        ...perplexityResponse.data.competitors
+      ];
+      // Deduplicate by domain
+      enhancedResponse.competitors = combinedCompetitors.filter(
+        (c, index, arr) => arr.findIndex(o => o.domain === c.domain) === index
+      ).slice(0, 5);
+
+      enhancedResponse.opportunities = [
+        ...enhancedResponse.opportunities,
+        ...perplexityResponse.data.opportunities
+      ].slice(0, 10);
+
+      enhancedResponse.marketInsights = [
+        ...enhancedResponse.marketInsights,
+        ...perplexityResponse.data.marketInsights
+      ].slice(0, 10);
+    }
 
     if (claudeGapsResponse.success && claudeGapsResponse.data) {
       console.log('✅ Claude content gaps analysis successful');
@@ -91,10 +126,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Step 4: Add analysis metadata
+    const baseTimestamp = (openaiResponse?.metadata.timestamp || perplexityResponse?.metadata.timestamp)!;
     enhancedResponse.analysisMetadata = {
       ...enhancedResponse.analysisMetadata,
-      analysisTime: Date.now() - (openaiResponse.metadata.timestamp.getTime()),
-      confidence: claudeGapsResponse.success ? 95 : 85 // Higher confidence with multi-LLM analysis
+      analysisTime: Date.now() - baseTimestamp.getTime(),
+      confidence: claudeGapsResponse.success ? 95 : 85
     };
 
     console.log('🎉 Competitor analysis completed successfully');
@@ -105,11 +141,17 @@ export async function POST(request: NextRequest) {
       data: enhancedResponse,
       metadata: {
         timestamp: new Date(),
-        duration: Date.now() - (openaiResponse.metadata.timestamp.getTime()),
+        duration: Date.now() - baseTimestamp.getTime(),
         provider: 'openai',
-        cached: openaiResponse.metadata.cached,
-        tokensUsed: (openaiResponse.metadata.tokensUsed || 0) + (claudeGapsResponse.metadata?.tokensUsed || 0),
-        cost: (openaiResponse.metadata.cost || 0) + (claudeGapsResponse.metadata?.cost || 0)
+        cached: openaiResponse?.metadata.cached ?? perplexityResponse?.metadata.cached,
+        tokensUsed:
+          (openaiResponse?.metadata.tokensUsed || 0) +
+          (perplexityResponse?.metadata.tokensUsed || 0) +
+          (claudeGapsResponse.metadata?.tokensUsed || 0),
+        cost:
+          (openaiResponse?.metadata.cost || 0) +
+          (perplexityResponse?.metadata.cost || 0) +
+          (claudeGapsResponse.metadata?.cost || 0)
       }
     };
 
@@ -141,7 +183,7 @@ export async function POST(request: NextRequest) {
 export async function GET() {
   try {
     // Check if all required environment variables are present
-    const requiredEnvVars = ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY'];
+    const requiredEnvVars = ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'PERPLEXITY_API_KEY'];
     const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
     
     if (missingVars.length > 0) {
@@ -153,16 +195,18 @@ export async function GET() {
     }
 
     // Test API clients
-    const [openaiHealth, claudeHealth] = await Promise.allSettled([
+    const [openaiHealth, claudeHealth, perplexityHealth] = await Promise.allSettled([
       openaiClient.healthCheck(),
-      claudeClient.healthCheck()
+      claudeClient.healthCheck(),
+      perplexityClient.healthCheck()
     ]);
 
     const healthStatus = {
       status: 'healthy',
       services: {
         openai: openaiHealth.status === 'fulfilled' && openaiHealth.value.success,
-        claude: claudeHealth.status === 'fulfilled' && claudeHealth.value.success
+        claude: claudeHealth.status === 'fulfilled' && claudeHealth.value.success,
+        perplexity: perplexityHealth.status === 'fulfilled' && perplexityHealth.value.success
       },
       timestamp: new Date()
     };

@@ -217,7 +217,16 @@ export function createAPIConfig(provider: LLMProvider): APIConfig {
   return {
     provider,
     apiKey: process.env[`${envPrefix}_API_KEY`] || '',
-    model: process.env[`${envPrefix}_MODEL`] || (provider === 'gemini' ? 'gemini-1.5-flash' : provider === 'openai' ? 'gpt-4o-mini' : provider === 'claude' ? 'claude-3-haiku-20240307' : ''),
+    model: process.env[`${envPrefix}_MODEL`] ||
+      (provider === 'gemini'
+        ? 'gemini-1.5-flash'
+        : provider === 'openai'
+          ? 'gpt-4o-mini'
+          : provider === 'claude'
+            ? 'claude-3-haiku-20240307'
+            : provider === 'perplexity'
+              ? 'llama-3.1-sonar-large-128k-online'
+              : ''),
     timeout: parseInt(process.env.API_TIMEOUT || '30000'),
     retries: parseInt(process.env.API_RETRIES || '3'),
     rateLimit: {
