@@ -9,21 +9,21 @@ export function cn(...inputs: ClassValue[]) {
 
 export function calculateReadabilityScore(content: string): number {
   if (!content || content.trim().length === 0) return 0
-  
-  const sentences = content.split(/[.!?]+/).filter(s => s.trim().length > 0)
-  const words = content.split(/\s+/).filter(w => w.length > 0)
+
+  const sentences = content.split(/[.!?]+/).filter((s) => s.trim().length > 0)
+  const words = content.split(/\s+/).filter((w) => w.length > 0)
   const syllables = words.reduce((total, word) => total + countSyllables(word), 0)
-  
+
   if (sentences.length === 0 || words.length === 0) return 0
-  
+
   const avgSentenceLength = words.length / sentences.length
   const avgSyllablesPerWord = syllables / words.length
-  
-  // Flesch Reading Ease Score
-  const fleschScore = 206.835 - (1.015 * avgSentenceLength) - (84.6 * avgSyllablesPerWord)
-  
-  // Convert to 0-100 scale where higher is better
-  return Math.max(0, Math.min(100, fleschScore))
+
+  // Flesch–Kincaid Grade Level
+  const gradeLevel = 0.39 * avgSentenceLength + 11.8 * avgSyllablesPerWord - 15.59
+
+  // Clamp to a sensible range (0–18+)
+  return Math.max(0, Math.min(18, gradeLevel))
 }
 
 export function calculateOriginalityScore(content: string): number {
