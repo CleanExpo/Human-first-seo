@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { openaiClient } from '@/lib/api/openai-client';
 import { claudeClient } from '@/lib/api/claude-client';
 import { geminiClient } from '@/lib/api/gemini-client';
+import { perplexityClient } from '@/lib/api/perplexity-client';
 import type { 
   ContentAnalysisRequest, 
   ContentAnalysisResponse,
@@ -33,14 +34,22 @@ export async function POST(request: NextRequest) {
     console.log('🔍 Starting multi-LLM content analysis...');
     const startTime = Date.now();
 
-    // Step 1: OpenAI - Primary content analysis
-    console.log('🤖 OpenAI analyzing content structure and SEO...');
-    const openaiResponse = await openaiClient.analyzeContent(body);
+    // Step 1: Analyze content with OpenAI and Perplexity in parallel
+    console.log('🤖 Running OpenAI and Perplexity content analysis...');
+    const [openaiResult, perplexityResult] = await Promise.allSettled([
+      openaiClient.analyzeContent(body),
+      perplexityClient.analyzeContent(body)
+    ]);
 
-    if (!openaiResponse.success || !openaiResponse.data) {
-      console.error('❌ OpenAI content analysis failed:', openaiResponse.error);
-      return NextResponse.json(openaiResponse, { status: 500 });
+    const openaiResponse = openaiResult.status === 'fulfilled' ? openaiResult.value : null;
+    const perplexityResponse = perplexityResult.status === 'fulfilled' ? perplexityResult.value : null;
+
+    if (!openaiResponse?.success && !perplexityResponse?.success) {
+      console.error('❌ Both OpenAI and Perplexity content analysis failed');
+      return NextResponse.json(openaiResponse || perplexityResponse, { status: 500 });
     }
+
+    const baseData = openaiResponse?.data || perplexityResponse?.data;
 
     // Step 2: Claude - Readability and originality analysis
     console.log('🧠 Claude analyzing readability and originality...');
@@ -62,7 +71,25 @@ export async function POST(request: NextRequest) {
 
     // Step 4: Merge and enhance the analysis
     console.log('🔄 Merging multi-LLM insights...');
-    const enhancedResponse = { ...openaiResponse.data };
+    const enhancedResponse = { ...(baseData as ContentAnalysisResponse) };
+
+    if (perplexityResponse?.success && perplexityResponse.data) {
+      const pData = perplexityResponse.data;
+      enhancedResponse.suggestions = [
+        ...enhancedResponse.suggestions,
+        ...pData.suggestions
+      ].slice(0, 15);
+
+      const eScores = enhancedResponse.scores;
+      const pScores = pData.scores;
+      eScores.readability = Math.round((eScores.readability + pScores.readability) / 2);
+      eScores.seo = Math.round((eScores.seo + pScores.seo) / 2);
+      eScores.originality = Math.round((eScores.originality + pScores.originality) / 2);
+      eScores.factCheck = Math.round((eScores.factCheck + pScores.factCheck) / 2);
+      eScores.humanAuthenticity = Math.round((eScores.humanAuthenticity + pScores.humanAuthenticity) / 2);
+      eScores.engagement = Math.round((eScores.engagement + pScores.engagement) / 2);
+      eScores.overall = Math.round((eScores.overall + pScores.overall) / 2);
+    }
 
     // Enhance readability analysis with Claude's insights
     if (claudeReadabilityResponse.status === 'fulfilled' && claudeReadabilityResponse.value.success) {
@@ -177,13 +204,15 @@ export async function POST(request: NextRequest) {
     console.log('🎉 Multi-LLM content analysis completed successfully');
 
     // Calculate total cost and tokens
-    const totalTokens = (openaiResponse.metadata.tokensUsed || 0) +
+    const totalTokens = (openaiResponse?.metadata.tokensUsed || 0) +
+      (perplexityResponse?.metadata.tokensUsed || 0) +
       (claudeReadabilityResponse.status === 'fulfilled' ? claudeReadabilityResponse.value.metadata?.tokensUsed || 0 : 0) +
       (claudeOriginalityResponse.status === 'fulfilled' ? claudeOriginalityResponse.value.metadata?.tokensUsed || 0 : 0) +
       (geminiSEOResponse.status === 'fulfilled' ? geminiSEOResponse.value.metadata?.tokensUsed || 0 : 0) +
       (geminiSuggestionsResponse.status === 'fulfilled' ? geminiSuggestionsResponse.value.metadata?.tokensUsed || 0 : 0);
 
-    const totalCost = (openaiResponse.metadata.cost || 0) +
+    const totalCost = (openaiResponse?.metadata.cost || 0) +
+      (perplexityResponse?.metadata.cost || 0) +
       (claudeReadabilityResponse.status === 'fulfilled' ? claudeReadabilityResponse.value.metadata?.cost || 0 : 0) +
       (claudeOriginalityResponse.status === 'fulfilled' ? claudeOriginalityResponse.value.metadata?.cost || 0 : 0) +
       (geminiSEOResponse.status === 'fulfilled' ? geminiSEOResponse.value.metadata?.cost || 0 : 0) +
@@ -197,7 +226,7 @@ export async function POST(request: NextRequest) {
         timestamp: new Date(),
         duration: Date.now() - startTime,
         provider: 'openai', // Primary provider
-        cached: openaiResponse.metadata.cached,
+        cached: openaiResponse?.metadata.cached ?? perplexityResponse?.metadata.cached,
         tokensUsed: totalTokens,
         cost: totalCost
       }
@@ -231,7 +260,7 @@ export async function POST(request: NextRequest) {
 export async function GET() {
   try {
     // Check if all required environment variables are present
-    const requiredEnvVars = ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GOOGLE_AI_API_KEY'];
+    const requiredEnvVars = ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GOOGLE_AI_API_KEY', 'PERPLEXITY_API_KEY'];
     const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
     
     if (missingVars.length > 0) {
@@ -243,10 +272,11 @@ export async function GET() {
     }
 
     // Test API clients
-    const [openaiHealth, claudeHealth, geminiHealth] = await Promise.allSettled([
+    const [openaiHealth, claudeHealth, geminiHealth, perplexityHealth] = await Promise.allSettled([
       openaiClient.healthCheck(),
       claudeClient.healthCheck(),
-      geminiClient.healthCheck()
+      geminiClient.healthCheck(),
+      perplexityClient.healthCheck()
     ]);
 
     const healthStatus = {
@@ -254,7 +284,8 @@ export async function GET() {
       services: {
         openai: openaiHealth.status === 'fulfilled' && openaiHealth.value.success,
         claude: claudeHealth.status === 'fulfilled' && claudeHealth.value.success,
-        gemini: geminiHealth.status === 'fulfilled' && geminiHealth.value.success
+        gemini: geminiHealth.status === 'fulfilled' && geminiHealth.value.success,
+        perplexity: perplexityHealth.status === 'fulfilled' && perplexityHealth.value.success
       },
       timestamp: new Date()
     };
